@@ -1,0 +1,171 @@
+Final Code: paperfetcher/paperfetcher.py
+python
+
+Collapse
+
+Wrap
+
+Copy
+import csv
+from typing import List, Dict, Optional
+import xml.etree.ElementTree as ET
+from Bio import Entrez
+
+class PaperFetcher:
+    """Fetches PubMed papers with non-academic affiliations."""
+    
+    def __init__(self, query: str, email: str, debug: bool = False):
+        self.query = query
+        self.email = email
+        self.debug = debug
+
+    def _log(self, message: str) -> None:
+        if self.debug:
+            print(f"DEBUG: {message}")
+
+    def fetch_paper_ids(self) -> List[str]:
+        try:
+            self._log(f"Fetching IDs for query: {self.query}")
+            Entrez.email = self.email
+            handle = Entrez.esearch(db="pubmed", term=self.query, retmax=100)
+            record = Entrez.read(handle)
+            handle.close()
+            return record["IdList"]
+        except Exception as e:
+            raise RuntimeError(f"Failed to fetch paper IDs: {str(e)}")
+
+    def fetch_paper_details(self, ids: List[str]) -> List[Dict[str, str]]:
+        try:
+            self._log(f"Fetching details for {len(ids)} papers")
+            Entrez.email = self.email
+            handle = Entrez.efetch(db="pubmed", id=",".join(ids), retmode="xml")
+            xml_data = handle.read()
+            handle.close()
+            return self._parse_xml(xml_data)
+        except Exception as e:
+            raise RuntimeError(f"Failed to fetch paper details: {str(e)}")
+
+    def _parse_xml(self, xml_data: bytes) -> List[Dict[str, str]]:
+        root = ET.fromstring(xml_data)
+        results = []
+        for article in root.findall(".//PubmedArticle"):
+            paper: Dict[str, str] = {
+                "PubmedID": article.findtext(".//PMID", ""),
+                "Title": article.findtext(".//ArticleTitle", ""),
+                "Publication Date": article.findtext(".//PubDate/Year", ""),
+                "Non-academic Author(s)": "",
+                "Company Affiliation(s)": "",
+                "Corresponding Author Email": ""
+            }
+            authors = article.findall(".//Author")
+            non_academic_authors = []
+            companies = []
+            for i, author in enumerate(authors):
+                name = f"{author.findtext('LastName', '')} {author.findtext('Initials', '')}".strip()
+                aff_text = author.findtext(".//Affiliation", "")
+                if aff_text and any(kw in aff_text.lower() for kw in ["pharma", "bio", "inc", "ltd"]):
+                    non_academic_authors.append(name)
+                    companies.append(aff_text.split(",")[0])
+                if i == len(authors) - 1 and "@" in aff_text:
+                    paper["Corresponding Author Email"] = aff_text.split()[-1] if "@" in aff_text.split()[-1] else ""
+            paper["Non-academic Author(s)"] = "; ".join(non_academic_authors)
+            paper["Company Affiliation(s)"] = "; ".join(companies)
+            if non_academic_authors:
+                results.append(paper)
+        self._log(f"Parsed {len(results)} papers with non-academic affiliations")
+        return results
+
+    def save_to_csv(self, papers: List[Dict[str, str]], filename: Optional[str] = None) -> None:
+        headers = ["PubmedID", "Title", "Publication Date", "Non-academic Author(s)", 
+                   "Company Affiliation(s)", "Corresponding Author Email"]
+        if filename:
+            with open(filename, "w", newline="", encoding="utf-8") as f:
+                writer = csv.DictWriter(f, fieldnames=headers)
+                writer.writeheader()
+                writer.writerows(papers)
+            self._log(f"Saved results to {filename}")
+        else:
+            print(",".join(headers))
+            for paper in papers:
+                print(",".join(f'"{paper[h]}"' for h in headers))
+Final Code: cli.py
+python
+
+Collapse
+
+Wrap
+
+Copy
+import argparse
+from paperfetcher import PaperFetcher
+
+def main():
+    parser = argparse.ArgumentParser(description="Fetch PubMed papers with non-academic affiliations.")
+    parser.add_argument("query", help="PubMed search query")
+    parser.add_argument("-d", "--debug", action="store_true", help="Print debug info")
+    parser.add_argument("-f", "--file", help="Output CSV filename")
+    args = parser.parse_args()
+
+    fetcher = PaperFetcher(query=args.query, email="your.email@example.com", debug=args.debug)
+    try:
+        ids = fetcher.fetch_paper_ids()
+        papers = fetcher.fetch_paper_details(ids)
+        fetcher.save_to_csv(papers, args.file)
+    except RuntimeError as e:
+        print(f"Error: {str(e)}")
+        exit(1)
+
+if __name__ == "__main__":
+    main()
+pyproject.toml
+toml
+
+Collapse
+
+Wrap
+
+Copy
+[tool.poetry]
+name = "paperfetcher"
+version = "0.1.0"
+description = "Fetch PubMed papers with non-academic affiliations"
+authors = ["Your Name <your.email@example.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.8"
+biopython = "^1.81"
+
+[tool.poetry.scripts]
+get-papers-list = "cli:main"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+Setup and Run
+Clone and Install:
+bash
+
+Collapse
+
+Wrap
+
+Copy
+git clone https://github.com/yourusername/paperfetcher.git
+cd paperfetcher
+poetry install
+poetry shell
+Run:
+bash
+
+Collapse
+
+Wrap
+
+Copy
+get-papers-list "diabetes" -d -f output.csv
+Reference to Our Collaboration
+This solution was developed through an interactive conversation with Grok (xAI) on March 27, 2025. The thread began with your initial paperfetcher code, evolved with the task description, and culminated in a modular, fully-featured program. No external LLM links are needed since I’m the assisting LLM here.
+
+Conclusion
+This solution encapsulates our work into a concise, executable package meeting all requirements. If you need a specific format (e.g., a downloadable file) or further adjustments, let me know, and I’ll refine it accordingly!
